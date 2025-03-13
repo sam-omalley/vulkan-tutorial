@@ -15,6 +15,7 @@ use thiserror::Error;
 use vulkanalia::Version;
 use vulkanalia::loader::{LIBRARY, LibloadingLoader};
 use vulkanalia::prelude::v1_0::*;
+use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::window as vk_window;
 use winit::dpi::LogicalSize;
 use winit::event::{Event, WindowEvent};
@@ -84,9 +85,9 @@ impl App {
             let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
             let mut data = AppData::default();
             let instance = create_instance(window, &entry, &mut data)?;
+            data.surface = vk_window::create_surface(&instance, &window, &window)?;
 
             pick_physical_device(&instance, &mut data)?;
-
             let device = create_logical_device(&entry, &instance, &mut data)?;
 
             Ok(Self {
@@ -107,15 +108,12 @@ impl App {
     unsafe fn destroy(&mut self) {
         unsafe {
             self.device.destroy_device(None);
-        }
 
-        if VALIDATION_ENABLED {
-            unsafe {
+            if VALIDATION_ENABLED {
                 self.instance
                     .destroy_debug_utils_messenger_ext(self.data.messenger, None);
             }
-        }
-        unsafe {
+            self.instance.destroy_surface_khr(self.data.surface, None);
             self.instance.destroy_instance(None);
         }
     }
@@ -124,9 +122,11 @@ impl App {
 /// The Vulkan handles and associated properties used by our Vulkan app.
 #[derive(Clone, Debug, Default)]
 struct AppData {
+    surface: vk::SurfaceKHR,
     messenger: vk::DebugUtilsMessengerEXT,
     physical_device: vk::PhysicalDevice,
     graphics_queue: vk::Queue,
+    present_queue: vk::Queue,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -269,10 +269,19 @@ unsafe fn create_logical_device(
 ) -> Result<Device> {
     let indices = unsafe { QueueFamilyIndices::get(instance, data, data.physical_device)? };
 
+    let mut unique_indices = HashSet::new();
+    unique_indices.insert(indices.graphics);
+    unique_indices.insert(indices.present);
+
     let queue_priorities = &[1.0];
-    let queue_info = vk::DeviceQueueCreateInfo::builder()
-        .queue_family_index(indices.graphics)
-        .queue_priorities(queue_priorities);
+    let queue_infos = unique_indices
+        .iter()
+        .map(|i| {
+            vk::DeviceQueueCreateInfo::builder()
+                .queue_family_index(*i)
+                .queue_priorities(queue_priorities)
+        })
+        .collect::<Vec<_>>();
 
     let layers = if VALIDATION_ENABLED {
         vec![VALIDATION_LAYER.as_ptr()]
@@ -289,15 +298,15 @@ unsafe fn create_logical_device(
 
     let features = vk::PhysicalDeviceFeatures::builder();
 
-    let queue_infos = &[queue_info];
     let info = vk::DeviceCreateInfo::builder()
-        .queue_create_infos(queue_infos)
+        .queue_create_infos(&queue_infos)
         .enabled_layer_names(&layers)
         .enabled_extension_names(&extensions)
         .enabled_features(&features);
 
     let device = unsafe { instance.create_device(data.physical_device, &info, None)? };
     data.graphics_queue = unsafe { device.get_device_queue(indices.graphics, 0) };
+    data.present_queue = unsafe { device.get_device_queue(indices.present, 0) };
 
     Ok(device)
 }
@@ -305,6 +314,7 @@ unsafe fn create_logical_device(
 #[derive(Copy, Clone, Debug)]
 struct QueueFamilyIndices {
     graphics: u32,
+    present: u32,
 }
 
 impl QueueFamilyIndices {
@@ -321,8 +331,22 @@ impl QueueFamilyIndices {
             .position(|p| p.queue_flags.contains(vk::QueueFlags::GRAPHICS))
             .map(|i| i as u32);
 
-        if let Some(graphics) = graphics {
-            Ok(Self { graphics })
+        let mut present = None;
+        for (index, properties) in properties.iter().enumerate() {
+            unsafe {
+                if instance.get_physical_device_surface_support_khr(
+                    physical_device,
+                    index as u32,
+                    data.surface,
+                )? {
+                    present = Some(index as u32);
+                    break;
+                }
+            }
+        }
+
+        if let (Some(graphics), Some(present)) = (graphics, present) {
+            Ok(Self { graphics, present })
         } else {
             Err(anyhow!(SuitabilityError("Missing required queue familes.")))
         }
