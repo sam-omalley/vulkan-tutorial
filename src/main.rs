@@ -13,6 +13,7 @@ use anyhow::{Result, anyhow};
 use log::*;
 use thiserror::Error;
 use vulkanalia::Version;
+use vulkanalia::bytecode::Bytecode;
 use vulkanalia::loader::{LIBRARY, LibloadingLoader};
 use vulkanalia::prelude::v1_0::*;
 use vulkanalia::vk::KhrSurfaceExtension;
@@ -94,6 +95,7 @@ impl App {
             let device = create_logical_device(&entry, &instance, &mut data)?;
             create_swapchain(window, &instance, &device, &mut data)?;
             create_swapchain_image_views(&device, &mut data)?;
+            create_pipeline(&device, &mut data)?;
 
             Ok(Self {
                 entry,
@@ -112,6 +114,8 @@ impl App {
     /// Destroys our Vulkan app.
     unsafe fn destroy(&mut self) {
         unsafe {
+            self.device
+                .destroy_pipeline_layout(self.data.pipeline_layout, None);
             self.data
                 .swapchain_image_views
                 .iter()
@@ -143,6 +147,7 @@ struct AppData {
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
     swapchain_image_views: Vec<vk::ImageView>,
+    pipeline_layout: vk::PipelineLayout,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -306,6 +311,90 @@ unsafe fn create_swapchain_image_views(device: &Device, data: &mut AppData) -> R
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(())
+}
+
+unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
+    let vert = include_bytes!("../shaders/vert.spv");
+    let frag = include_bytes!("../shaders/frag.spv");
+
+    let vert_shader_module = unsafe { create_shader_module(device, &vert[..])? };
+    let frag_shader_module = unsafe { create_shader_module(device, &frag[..])? };
+
+    let vert_stage = vk::PipelineShaderStageCreateInfo::builder()
+        .stage(vk::ShaderStageFlags::VERTEX)
+        .module(vert_shader_module)
+        .name(b"main\0");
+
+    let frag_stage = vk::PipelineShaderStageCreateInfo::builder()
+        .stage(vk::ShaderStageFlags::FRAGMENT)
+        .module(frag_shader_module)
+        .name(b"main\0");
+
+    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder();
+
+    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+        .primitive_restart_enable(false);
+
+    let viewport = vk::Viewport::builder()
+        .x(0.0)
+        .y(0.0)
+        .width(data.swapchain_extent.width as f32)
+        .height(data.swapchain_extent.height as f32)
+        .min_depth(0.0)
+        .max_depth(1.0);
+
+    let scissor = vk::Rect2D::builder()
+        .offset(vk::Offset2D { x: 0, y: 0 })
+        .extent(data.swapchain_extent);
+
+    let viewports = &[viewport];
+    let scissors = &[scissor];
+    let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
+        .viewports(viewports)
+        .scissors(scissors);
+
+    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
+        .depth_clamp_enable(false)
+        .rasterizer_discard_enable(false)
+        .polygon_mode(vk::PolygonMode::FILL)
+        .line_width(1.0)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::CLOCKWISE)
+        .depth_bias_enable(false);
+
+    let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
+        .sample_shading_enable(false)
+        .rasterization_samples(vk::SampleCountFlags::_1);
+
+    let attachment = vk::PipelineColorBlendAttachmentState::builder()
+        .color_write_mask(vk::ColorComponentFlags::all())
+        .blend_enable(false);
+
+    let attachments = &[attachment];
+    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+        .logic_op_enable(false)
+        .logic_op(vk::LogicOp::COPY)
+        .attachments(attachments)
+        .blend_constants([0.0, 0.0, 0.0, 0.0]);
+
+    let layout_info = vk::PipelineLayoutCreateInfo::builder();
+
+    data.pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None)? };
+
+    unsafe {
+        device.destroy_shader_module(vert_shader_module, None);
+        device.destroy_shader_module(frag_shader_module, None);
+    }
+
+    Ok(())
+}
+
+unsafe fn create_shader_module(device: &Device, bytecode: &[u8]) -> Result<vk::ShaderModule> {
+    let bytecode = Bytecode::new(bytecode).unwrap();
+    let info = vk::ShaderModuleCreateInfo::builder().code(bytecode.code());
+
+    unsafe { Ok(device.create_shader_module(&info, None)?) }
 }
 
 /// Define our own debug_callback so that the debug messages get passed to our logger.
