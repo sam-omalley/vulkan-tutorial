@@ -132,7 +132,10 @@ struct AppData {
     physical_device: vk::PhysicalDevice,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
+    swapchain_format: vk::Format,
+    swapchain_extent: vk::Extent2D,
     swapchain: vk::SwapchainKHR,
+    swapchain_images: Vec<vk::Image>,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -225,6 +228,9 @@ unsafe fn create_swapchain(
     let present_mode = get_swapchain_present_mode(&support.present_modes);
     let extent = get_swapchain_extent(window, support.capabilities);
 
+    data.swapchain_format = surface_format.format;
+    data.swapchain_extent = extent;
+
     let mut image_count = support.capabilities.min_image_count + 1;
     if support.capabilities.max_image_count != 0
         && image_count > support.capabilities.max_image_count
@@ -258,6 +264,7 @@ unsafe fn create_swapchain(
         .old_swapchain(vk::SwapchainKHR::null());
 
     data.swapchain = unsafe { device.create_swapchain_khr(&info, None)? };
+    data.swapchain_images = unsafe { device.get_swapchain_images_khr(data.swapchain)? };
 
     Ok(())
 }
