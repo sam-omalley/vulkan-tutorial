@@ -73,6 +73,7 @@ struct App {
     entry: Entry,
     instance: Instance,
     data: AppData,
+    device: Device,
 }
 
 impl App {
@@ -86,10 +87,13 @@ impl App {
 
             pick_physical_device(&instance, &mut data)?;
 
+            let device = create_logical_device(&entry, &instance, &mut data)?;
+
             Ok(Self {
                 entry,
                 instance,
                 data,
+                device,
             })
         }
     }
@@ -102,10 +106,16 @@ impl App {
     /// Destroys our Vulkan app.
     unsafe fn destroy(&mut self) {
         unsafe {
-            if VALIDATION_ENABLED {
+            self.device.destroy_device(None);
+        }
+
+        if VALIDATION_ENABLED {
+            unsafe {
                 self.instance
                     .destroy_debug_utils_messenger_ext(self.data.messenger, None);
             }
+        }
+        unsafe {
             self.instance.destroy_instance(None);
         }
     }
@@ -116,6 +126,7 @@ impl App {
 struct AppData {
     messenger: vk::DebugUtilsMessengerEXT,
     physical_device: vk::PhysicalDevice,
+    graphics_queue: vk::Queue,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -249,6 +260,46 @@ unsafe fn check_physical_device(
         QueueFamilyIndices::get(instance, data, physical_device)?;
     }
     Ok(())
+}
+
+unsafe fn create_logical_device(
+    entry: &Entry,
+    instance: &Instance,
+    data: &mut AppData,
+) -> Result<Device> {
+    let indices = unsafe { QueueFamilyIndices::get(instance, data, data.physical_device)? };
+
+    let queue_priorities = &[1.0];
+    let queue_info = vk::DeviceQueueCreateInfo::builder()
+        .queue_family_index(indices.graphics)
+        .queue_priorities(queue_priorities);
+
+    let layers = if VALIDATION_ENABLED {
+        vec![VALIDATION_LAYER.as_ptr()]
+    } else {
+        vec![]
+    };
+
+    let mut extensions = vec![];
+
+    // Required by Vulkan SDK on macOS since 1.3.216.
+    if cfg!(target_os = "macos") && entry.version()? >= PORTABILITY_MACOS_VERSION {
+        extensions.push(vk::KHR_PORTABILITY_SUBSET_EXTENSION.name.as_ptr());
+    }
+
+    let features = vk::PhysicalDeviceFeatures::builder();
+
+    let queue_infos = &[queue_info];
+    let info = vk::DeviceCreateInfo::builder()
+        .queue_create_infos(queue_infos)
+        .enabled_layer_names(&layers)
+        .enabled_extension_names(&extensions)
+        .enabled_features(&features);
+
+    let device = unsafe { instance.create_device(data.physical_device, &info, None)? };
+    data.graphics_queue = unsafe { device.get_device_queue(indices.graphics, 0) };
+
+    Ok(device)
 }
 
 #[derive(Copy, Clone, Debug)]
