@@ -116,11 +116,10 @@ impl App {
     /// Destroys our Vulkan app.
     unsafe fn destroy(&mut self) {
         unsafe {
+            self.device.destroy_pipeline(self.data.pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.data.pipeline_layout, None);
             self.device.destroy_render_pass(self.data.render_pass, None);
-            self.device
-                .destroy_pipeline_layout(self.data.pipeline_layout, None);
             self.data
                 .swapchain_image_views
                 .iter()
@@ -154,6 +153,7 @@ struct AppData {
     swapchain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
+    pipeline: vk::Pipeline,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -422,6 +422,25 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
 
     data.pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None)? };
 
+    let stages = &[vert_stage, frag_stage];
+    let info = vk::GraphicsPipelineCreateInfo::builder()
+        .stages(stages)
+        .vertex_input_state(&vertex_input_state)
+        .input_assembly_state(&input_assembly_state)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterization_state)
+        .multisample_state(&multisample_state)
+        .color_blend_state(&color_blend_state)
+        .layout(data.pipeline_layout)
+        .render_pass(data.render_pass)
+        .subpass(0);
+
+    data.pipeline = unsafe {
+        device
+            .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
+            .0[0]
+    };
+
     unsafe {
         device.destroy_shader_module(vert_shader_module, None);
         device.destroy_shader_module(frag_shader_module, None);
@@ -432,7 +451,9 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
 
 unsafe fn create_shader_module(device: &Device, bytecode: &[u8]) -> Result<vk::ShaderModule> {
     let bytecode = Bytecode::new(bytecode).unwrap();
-    let info = vk::ShaderModuleCreateInfo::builder().code(bytecode.code());
+    let info = vk::ShaderModuleCreateInfo::builder()
+        .code_size(bytecode.code_size())
+        .code(bytecode.code());
 
     unsafe { Ok(device.create_shader_module(&info, None)?) }
 }
