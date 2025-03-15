@@ -8,7 +8,7 @@ pub type Vec3 = Vector3<f32>;
 
 pub static VERTICES: [Vertex; 3] = [
     Vertex::new(vec2(0.0, -0.5), vec3(1.0, 0.0, 0.0)),
-    Vertex::new(vec2(0.5, 0.5), vec3(0.0, 10.0, 0.0)),
+    Vertex::new(vec2(0.5, 0.5), vec3(0.0, 1.0, 0.0)),
     Vertex::new(vec2(-0.5, 0.5), vec3(0.0, 0.0, 1.0)),
 ];
 
