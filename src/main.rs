@@ -126,6 +126,7 @@ impl App {
             create_framebuffers(&device, &mut data)?;
             create_command_pool(&instance, &device, &mut data)?;
             create_texture_image(&instance, &device, &mut data)?;
+            create_texture_view(&device, &mut data)?;
             create_vertex_buffer(&instance, &device, &mut data)?;
             create_index_buffer(&instance, &device, &mut data)?;
             create_uniform_buffers(&instance, &device, &mut data)?;
@@ -279,6 +280,8 @@ impl App {
             self.device.device_wait_idle().unwrap();
 
             self.destroy_swapchain();
+            self.device
+                .destroy_image_view(self.data.texture_image_view, None);
             self.device.destroy_image(self.data.texture_image, None);
             self.device
                 .free_memory(self.data.texture_image_memory, None);
@@ -402,6 +405,7 @@ struct AppData {
     descriptor_sets: Vec<vk::DescriptorSet>,
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
+    texture_image_view: vk::ImageView,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -539,29 +543,7 @@ unsafe fn create_swapchain_image_views(device: &Device, data: &mut AppData) -> R
     data.swapchain_image_views = data
         .swapchain_images
         .iter()
-        .map(|i| {
-            let components = vk::ComponentMapping::builder()
-                .r(vk::ComponentSwizzle::IDENTITY)
-                .g(vk::ComponentSwizzle::IDENTITY)
-                .b(vk::ComponentSwizzle::IDENTITY)
-                .a(vk::ComponentSwizzle::IDENTITY);
-
-            let subresource_range = vk::ImageSubresourceRange::builder()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .base_mip_level(0)
-                .level_count(1)
-                .base_array_layer(0)
-                .layer_count(1);
-
-            let info = vk::ImageViewCreateInfo::builder()
-                .image(*i)
-                .view_type(vk::ImageViewType::_2D)
-                .format(data.swapchain_format)
-                .components(components)
-                .subresource_range(subresource_range);
-
-            unsafe { device.create_image_view(&info, None) }
-        })
+        .map(|i| unsafe { create_image_view(device, *i, data.swapchain_format) })
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(())
@@ -671,6 +653,34 @@ unsafe fn create_buffer(
 
         Ok((buffer, buffer_memory))
     }
+}
+
+unsafe fn create_image_view(
+    device: &Device,
+    image: vk::Image,
+    format: vk::Format,
+) -> Result<vk::ImageView> {
+    let subresource_range = vk::ImageSubresourceRange::builder()
+        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .base_mip_level(0)
+        .level_count(1)
+        .base_array_layer(0)
+        .layer_count(1);
+
+    let info = vk::ImageViewCreateInfo::builder()
+        .image(image)
+        .view_type(vk::ImageViewType::_2D)
+        .format(format)
+        .subresource_range(subresource_range);
+
+    unsafe { Ok(device.create_image_view(&info, None)?) }
+}
+
+unsafe fn create_texture_view(device: &Device, data: &mut AppData) -> Result<()> {
+    data.texture_image_view =
+        unsafe { create_image_view(device, data.texture_image, vk::Format::R8G8B8A8_SRGB)? };
+
+    Ok(())
 }
 
 /// Note: The png crate does not have support for converting RGB iamges
