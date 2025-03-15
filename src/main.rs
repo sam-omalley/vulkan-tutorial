@@ -5,6 +5,8 @@
     clippy::unnecessary_wraps
 )]
 
+mod vertex;
+
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::os::raw::c_void;
@@ -25,6 +27,8 @@ use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
 use vulkanalia::vk::ExtDebugUtilsExtension;
+
+use vertex::Vertex;
 
 const PORTABILITY_MACOS_VERSION: Version = Version::new(1, 3, 216);
 
@@ -652,7 +656,11 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
         .module(frag_shader_module)
         .name(b"main\0");
 
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder();
+    let binding_descriptions = &[Vertex::binding_description()];
+    let attribute_descriptions = Vertex::attribute_descriptions();
+    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
+        .vertex_binding_descriptions(binding_descriptions)
+        .vertex_attribute_descriptions(&attribute_descriptions);
 
     let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
