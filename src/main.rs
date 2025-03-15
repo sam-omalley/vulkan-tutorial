@@ -30,7 +30,7 @@ use winit::window::{Window, WindowBuilder};
 
 use vulkanalia::vk::ExtDebugUtilsExtension;
 
-use vertex::{VERTICES, Vertex};
+use vertex::{INDICES, VERTICES, Vertex};
 
 const PORTABILITY_MACOS_VERSION: Version = Version::new(1, 3, 216);
 
@@ -120,6 +120,7 @@ impl App {
             create_framebuffers(&device, &mut data)?;
             create_command_pool(&instance, &device, &mut data)?;
             create_vertex_buffer(&instance, &device, &mut data)?;
+            create_index_buffer(&instance, &device, &mut data)?;
             create_command_buffers(&device, &mut data)?;
             create_sync_objects(&device, &mut data)?;
 
@@ -225,6 +226,8 @@ impl App {
 
             self.destroy_swapchain();
 
+            self.device.destroy_buffer(self.data.index_buffer, None);
+            self.device.free_memory(self.data.index_buffer_memory, None);
             self.device.destroy_buffer(self.data.vertex_buffer, None);
             self.device
                 .free_memory(self.data.vertex_buffer_memory, None);
@@ -322,6 +325,8 @@ struct AppData {
     images_in_flight: Vec<vk::Fence>,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
+    index_buffer: vk::Buffer,
+    index_buffer_memory: vk::DeviceMemory,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -645,6 +650,58 @@ unsafe fn create_vertex_buffer(
     Ok(())
 }
 
+unsafe fn create_index_buffer(
+    instance: &Instance,
+    device: &Device,
+    data: &mut AppData,
+) -> Result<()> {
+    let size = std::mem::size_of_val(INDICES) as u64;
+    let (staging_buffer, staging_buffer_memory) = unsafe {
+        create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )?
+    };
+
+    unsafe {
+        let memory =
+            device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+
+        memcpy(INDICES.as_ptr(), memory.cast(), INDICES.len());
+
+        device.unmap_memory(staging_buffer_memory);
+    }
+
+    let (index_buffer, index_buffer_memory) = unsafe {
+        create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?
+    };
+
+    data.index_buffer = index_buffer;
+    data.index_buffer_memory = index_buffer_memory;
+
+    unsafe {
+        // Copy data from staging buffer to index buffer.
+        copy_buffer(device, data, staging_buffer, index_buffer, size)?;
+
+        // Clean up staging buffer.
+        device.destroy_buffer(staging_buffer, None);
+        device.free_memory(staging_buffer_memory, None);
+    }
+
+    Ok(())
+}
+
 unsafe fn copy_buffer(
     device: &Device,
     data: &AppData,
@@ -728,13 +785,20 @@ unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<
             );
 
             device.cmd_bind_vertex_buffers(*command_buffer, 0, &[data.vertex_buffer], &[0]);
-
-            device.cmd_draw(
+            device.cmd_bind_index_buffer(
                 *command_buffer,
-                VERTICES.len() as u32, // vertex_count - Even though we don't have a vertex buffer, we technically still have 3 vertices to draw
+                data.index_buffer,
+                0,
+                vk::IndexType::UINT16,
+            );
+
+            device.cmd_draw_indexed(
+                *command_buffer,
+                INDICES.len() as u32, // index_count
                 1, // instance_count - Used for instanced rendering, use 1 if you're not doing that.
-                0, // first_vertex - Used as an offset into the vertex buffer, defines the lowest value of gl_VertexIndex.
-                0, // first_instance - Used as an offset for instanced rendering, defines the lowest value of gl_InstanceIndex.
+                0, // first_index
+                0, // vertex_offset
+                0, // first_instance
             );
 
             device.cmd_end_render_pass(*command_buffer);
