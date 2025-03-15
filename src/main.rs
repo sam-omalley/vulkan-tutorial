@@ -556,20 +556,22 @@ unsafe fn create_sync_objects(device: &Device, data: &mut AppData) -> Result<()>
     Ok(())
 }
 
-unsafe fn create_vertex_buffer(
+unsafe fn create_buffer(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
-) -> Result<()> {
+    size: vk::DeviceSize,
+    usage: vk::BufferUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+) -> Result<(vk::Buffer, vk::DeviceMemory)> {
     let buffer_info = vk::BufferCreateInfo::builder()
-        .size((size_of::<Vertex>() * VERTICES.len()) as u64)
-        .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE)
-        .flags(vk::BufferCreateFlags::empty()); // Optional.
+        .size(size)
+        .usage(usage)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-    data.vertex_buffer = unsafe { device.create_buffer(&buffer_info, None)? };
+    let buffer = unsafe { device.create_buffer(&buffer_info, None)? };
 
-    let requirements = unsafe { device.get_buffer_memory_requirements(data.vertex_buffer) };
+    let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
 
     let memory_info = unsafe {
         vk::MemoryAllocateInfo::builder()
@@ -577,24 +579,47 @@ unsafe fn create_vertex_buffer(
             .memory_type_index(get_memory_type_index(
                 instance,
                 data,
-                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                properties,
                 requirements,
             )?)
     };
 
     unsafe {
-        data.vertex_buffer_memory = device.allocate_memory(&memory_info, None)?;
-        device.bind_buffer_memory(data.vertex_buffer, data.vertex_buffer_memory, 0)?;
+        let buffer_memory = device.allocate_memory(&memory_info, None)?;
 
-        let memory = device.map_memory(
-            data.vertex_buffer_memory,
-            0,
-            buffer_info.size,
-            vk::MemoryMapFlags::empty(),
-        )?;
+        device.bind_buffer_memory(buffer, buffer_memory, 0)?;
+
+        Ok((buffer, buffer_memory))
+    }
+}
+
+unsafe fn create_vertex_buffer(
+    instance: &Instance,
+    device: &Device,
+    data: &mut AppData,
+) -> Result<()> {
+    let size = (size_of::<Vertex>() * VERTICES.len()) as u64;
+    let (vertex_buffer, vertex_buffer_memory) = unsafe {
+        create_buffer(
+            instance,
+            device,
+            data,
+            size,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )?
+    };
+
+    data.vertex_buffer = vertex_buffer;
+    data.vertex_buffer_memory = vertex_buffer_memory;
+
+    unsafe {
+        let memory =
+            device.map_memory(vertex_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
 
         memcpy(VERTICES.as_ptr(), memory.cast(), VERTICES.len());
-        device.unmap_memory(data.vertex_buffer_memory);
+
+        device.unmap_memory(vertex_buffer_memory);
     }
 
     Ok(())
