@@ -127,6 +127,7 @@ impl App {
             create_command_pool(&instance, &device, &mut data)?;
             create_texture_image(&instance, &device, &mut data)?;
             create_texture_view(&device, &mut data)?;
+            create_texture_sampler(&device, &mut data)?;
             create_vertex_buffer(&instance, &device, &mut data)?;
             create_index_buffer(&instance, &device, &mut data)?;
             create_uniform_buffers(&instance, &device, &mut data)?;
@@ -280,6 +281,7 @@ impl App {
             self.device.device_wait_idle().unwrap();
 
             self.destroy_swapchain();
+            self.device.destroy_sampler(self.data.texture_sampler, None);
             self.device
                 .destroy_image_view(self.data.texture_image_view, None);
             self.device.destroy_image(self.data.texture_image, None);
@@ -406,6 +408,7 @@ struct AppData {
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
     texture_image_view: vk::ImageView,
+    texture_sampler: vk::Sampler,
 }
 
 unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) -> Result<Instance> {
@@ -674,6 +677,28 @@ unsafe fn create_image_view(
         .subresource_range(subresource_range);
 
     unsafe { Ok(device.create_image_view(&info, None)?) }
+}
+unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Result<()> {
+    let info = vk::SamplerCreateInfo::builder()
+        .mag_filter(vk::Filter::LINEAR)
+        .min_filter(vk::Filter::LINEAR)
+        .address_mode_u(vk::SamplerAddressMode::REPEAT)
+        .address_mode_v(vk::SamplerAddressMode::REPEAT)
+        .address_mode_w(vk::SamplerAddressMode::REPEAT)
+        .anisotropy_enable(true)
+        .max_anisotropy(16.0)
+        .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+        .unnormalized_coordinates(false)
+        .compare_enable(false)
+        .compare_op(vk::CompareOp::ALWAYS)
+        .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+        .mip_lod_bias(0.0)
+        .min_lod(0.0)
+        .max_lod(0.0);
+
+    data.texture_sampler = unsafe { device.create_sampler(&info, None)? };
+
+    Ok(())
 }
 
 unsafe fn create_texture_view(device: &Device, data: &mut AppData) -> Result<()> {
@@ -1446,6 +1471,12 @@ unsafe fn check_physical_device(
     if support.formats.is_empty() || support.present_modes.is_empty() {
         return Err(anyhow!(SuitabilityError("Insufficient swapchain support.")));
     }
+
+    let features = unsafe { instance.get_physical_device_features(physical_device) };
+    if features.sampler_anisotropy != vk::TRUE {
+        return Err(anyhow!(SuitabilityError("No sampler anisotropy.")));
+    }
+
     Ok(())
 }
 
@@ -1507,7 +1538,7 @@ unsafe fn create_logical_device(
         extensions.push(vk::KHR_PORTABILITY_SUBSET_EXTENSION.name.as_ptr());
     }
 
-    let features = vk::PhysicalDeviceFeatures::builder();
+    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
 
     let info = vk::DeviceCreateInfo::builder()
         .queue_create_infos(&queue_infos)
