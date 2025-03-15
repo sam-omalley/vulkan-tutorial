@@ -1,4 +1,4 @@
-use cgmath::{Vector2, Vector3, vec2, vec3};
+pub use cgmath::{Vector2, Vector3, vec2, vec3};
 use std::mem::size_of;
 
 use vulkanalia::prelude::v1_0::*;
