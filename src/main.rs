@@ -8,9 +8,10 @@
 mod uniform_buffer_object;
 mod vertex;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::CStr;
 use std::fs::File;
+use std::io::BufReader;
 use std::mem::size_of;
 use std::os::raw::c_void;
 use std::ptr::copy_nonoverlapping as memcpy;
@@ -129,6 +130,7 @@ impl App {
             create_texture_image(&instance, &device, &mut data)?;
             create_texture_view(&device, &mut data)?;
             create_texture_sampler(&device, &mut data)?;
+            load_model(&mut data)?;
             create_vertex_buffer(&instance, &device, &mut data)?;
             create_index_buffer(&instance, &device, &mut data)?;
             create_uniform_buffers(&instance, &device, &mut data)?;
@@ -416,6 +418,8 @@ struct AppData {
     render_finished_semaphores: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
     images_in_flight: Vec<vk::Fence>,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
@@ -774,7 +778,7 @@ unsafe fn create_texture_image(
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let image = File::open("resources/texture.png")?;
+    let image = File::open("resources/viking_room.png")?;
 
     let decoder = png::Decoder::new(image);
     let mut reader = decoder.read_info()?;
@@ -784,6 +788,10 @@ unsafe fn create_texture_image(
 
     let size = reader.info().raw_bytes() as u64;
     let (width, height) = reader.info().size();
+
+    if width != 1024 || height != 1024 || reader.info().color_type != png::ColorType::Rgba {
+        panic!("Invalid texture image.");
+    }
 
     unsafe {
         let (staging_buffer, staging_buffer_memory) = create_buffer(
@@ -901,12 +909,57 @@ unsafe fn create_image(
     }
 }
 
+unsafe fn load_model(data: &mut AppData) -> Result<()> {
+    let mut reader = BufReader::new(File::open("resources/viking_room.obj")?);
+    let (models, _) = tobj::load_obj_buf(
+        &mut reader,
+        &tobj::LoadOptions {
+            triangulate: true,
+            ..Default::default()
+        },
+        |_| Ok(Default::default()),
+    )?;
+
+    let mut unique_vertices = HashMap::new();
+
+    for model in &models {
+        for index in &model.mesh.indices {
+            let pos_offset = (3 * index) as usize;
+            let tex_coord_offset = (2 * index) as usize;
+
+            let vertex = Vertex {
+                pos: vec3(
+                    model.mesh.positions[pos_offset],
+                    model.mesh.positions[pos_offset + 1],
+                    model.mesh.positions[pos_offset + 2],
+                ),
+                color: vec3(1.0, 1.0, 1.0),
+                tex_coord: vec2(
+                    model.mesh.texcoords[tex_coord_offset],
+                    1.0 - model.mesh.texcoords[tex_coord_offset + 1],
+                ),
+            };
+
+            if let Some(index) = unique_vertices.get(&vertex) {
+                data.indices.push(*index as u32);
+            } else {
+                let index = data.vertices.len();
+                unique_vertices.insert(vertex, index);
+                data.vertices.push(vertex);
+                data.indices.push(index as u32);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 unsafe fn create_vertex_buffer(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let size = (size_of::<Vertex>() * VERTICES.len()) as u64;
+    let size = (size_of::<Vertex>() * data.vertices.len()) as u64;
     let (staging_buffer, staging_buffer_memory) = unsafe {
         create_buffer(
             instance,
@@ -922,7 +975,7 @@ unsafe fn create_vertex_buffer(
         let memory =
             device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
 
-        memcpy(VERTICES.as_ptr(), memory.cast(), VERTICES.len());
+        memcpy(data.vertices.as_ptr(), memory.cast(), data.vertices.len());
 
         device.unmap_memory(staging_buffer_memory);
     }
@@ -958,7 +1011,7 @@ unsafe fn create_index_buffer(
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let size = std::mem::size_of_val(INDICES) as u64;
+    let size = (size_of::<u32>() * data.indices.len()) as u64;
     let (staging_buffer, staging_buffer_memory) = unsafe {
         create_buffer(
             instance,
@@ -974,7 +1027,7 @@ unsafe fn create_index_buffer(
         let memory =
             device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
 
-        memcpy(INDICES.as_ptr(), memory.cast(), INDICES.len());
+        memcpy(data.indices.as_ptr(), memory.cast(), data.indices.len());
 
         device.unmap_memory(staging_buffer_memory);
     }
@@ -1330,7 +1383,7 @@ unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<
                 *command_buffer,
                 data.index_buffer,
                 0,
-                vk::IndexType::UINT16,
+                vk::IndexType::UINT32,
             );
             device.cmd_bind_descriptor_sets(
                 *command_buffer,
@@ -1343,7 +1396,7 @@ unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<
 
             device.cmd_draw_indexed(
                 *command_buffer,
-                INDICES.len() as u32, // index_count
+                data.indices.len() as u32, // index_count
                 1, // instance_count - Used for instanced rendering, use 1 if you're not doing that.
                 0, // first_index
                 0, // vertex_offset
@@ -1554,7 +1607,7 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
         .rasterizer_discard_enable(false)
         .polygon_mode(vk::PolygonMode::FILL)
         .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::BACK)
+        .cull_mode(vk::CullModeFlags::NONE)
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
         .depth_bias_enable(false);
 
