@@ -1329,8 +1329,8 @@ unsafe fn create_descriptor_set_layout(device: &Device, data: &mut AppData) -> R
 }
 
 unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
-    let vert = include_bytes!("../shaders/vert.spv");
-    let frag = include_bytes!("../shaders/frag.spv");
+    let vert = include_bytes!("../shaders/shader.vert.spv");
+    let frag = include_bytes!("../shaders/shader.frag.spv");
 
     let vert_shader_module = unsafe { create_shader_module(device, &vert[..])? };
     let frag_shader_module = unsafe { create_shader_module(device, &frag[..])? };
