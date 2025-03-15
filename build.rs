@@ -62,7 +62,7 @@ fn compile_shaders(files: &[PathBuf]) {
         output_path.push(output_name);
 
         let result = Command::new("glslc")
-            .arg(&path)
+            .arg(path)
             .arg("-o")
             .arg(output_path)
             .output();
