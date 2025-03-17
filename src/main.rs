@@ -116,6 +116,8 @@ impl App {
             let instance = create_instance(window, &entry, &mut data)?;
             data.surface = vk_window::create_surface(&instance, &window, &window)?;
 
+            debug_log_physical_devices(&instance, &data)?;
+
             pick_physical_device(&instance, &mut data)?;
             let device = create_logical_device(&entry, &instance, &mut data)?;
             create_swapchain(window, &instance, &device, &mut data)?;
@@ -1703,6 +1705,31 @@ extern "system" fn debug_callback(
 #[derive(Debug, Error)]
 #[error("Missing {0}.")]
 pub struct SuitabilityError(pub &'static str);
+
+fn debug_log_physical_devices(instance: &Instance, data: &AppData) -> Result<()> {
+    if log::log_enabled!(Level::Debug) {
+        for physical_device in unsafe { instance.enumerate_physical_devices()? } {
+            unsafe {
+                let properties = instance.get_physical_device_properties(physical_device);
+                let support = SwapchainSupport::get(instance, data, physical_device)?;
+                let extensions = instance
+                    .enumerate_device_extension_properties(physical_device, None)?
+                    .iter()
+                    .map(|e| e.extension_name)
+                    .collect::<HashSet<_>>();
+
+                let features = instance.get_physical_device_features(physical_device);
+
+                debug!("Name: {}", properties.device_name);
+                debug!("Properties: {:#?}", properties);
+                debug!("Support: {:#?}", support);
+                debug!("Extensions: {:#?}", extensions);
+            }
+        }
+    }
+
+    Ok(())
+}
 
 unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> Result<()> {
     for physical_device in unsafe { instance.enumerate_physical_devices()? } {
