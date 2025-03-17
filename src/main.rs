@@ -1852,7 +1852,10 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
         .depth_bias_enable(false);
 
     let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
-        .sample_shading_enable(false)
+        // Enable sample shading in the pipeline
+        .sample_shading_enable(true)
+        // Minimum fraction for sample shading; closer to one is smoother.
+        .min_sample_shading(0.2)
         .rasterization_samples(data.msaa_samples);
 
     let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::builder()
@@ -2087,7 +2090,9 @@ unsafe fn create_logical_device(
         extensions.push(vk::KHR_PORTABILITY_SUBSET_EXTENSION.name.as_ptr());
     }
 
-    let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+    let features = vk::PhysicalDeviceFeatures::builder()
+        .sampler_anisotropy(true)
+        .sample_rate_shading(true);
 
     let info = vk::DeviceCreateInfo::builder()
         .queue_create_infos(&queue_infos)
