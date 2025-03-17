@@ -19,6 +19,7 @@ use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use log::*;
+use mouse_position::mouse_position::Mouse;
 use thiserror::Error;
 use vulkanalia::Version;
 use vulkanalia::bytecode::Bytecode;
@@ -244,8 +245,16 @@ impl App {
 
     unsafe fn update_uniform_buffer(&self, image_index: usize) -> Result<()> {
         let time = self.start.elapsed().as_secs_f32();
+        let position = Mouse::get_mouse_position();
+        let width = self.data.swapchain_extent.width as f32;
+        let height = self.data.swapchain_extent.height as f32;
 
-        let model = Mat4::from_axis_angle(vec3(0.0, 0.0, 1.0), Deg(90.0) * time);
+        let (ratio_x, ratio_y) = match position {
+            Mouse::Position { x, y } => (x as f32 / width, y as f32 / height),
+            Mouse::Error => (width / 2.0, height / 2.0),
+        };
+
+        let model = Mat4::from_axis_angle(vec3(0.0, 0.0, 1.0), Deg(360.0) * ratio_x);
 
         let view = Mat4::look_at_rh(
             point3(2.0, 2.0, 2.0),
@@ -269,7 +278,7 @@ impl App {
 
         let proj = correction
             * perspective(
-                Deg(45.0),
+                Deg(180.0) * ratio_y.clamp(0.1, 0.9),
                 self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32,
                 0.1,
                 10.0,
